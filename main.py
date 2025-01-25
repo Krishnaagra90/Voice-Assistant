@@ -15,6 +15,8 @@ import pyjokes  # For jokes
 import psutil  # For system status
 import wikipedia  # For Wikipedia search
 from pycaw.pycaw import AudioUtilities  # For system volume control
+import pyautogui
+import time
 
 # Set the path for the Google Cloud service account key
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\krish\Downloads\canvas-rampart-448807-h9-2b2f89fb0d1b.json"
@@ -23,8 +25,13 @@ os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"C:\Users\krish\Downloads\canvas
 recognizer = sr.Recognizer()
 engine = pyttsx3.init()
 
+# Variable to track if music is currently playing
+music_playing = False
+youtube_playing = False
+
 def speak(text):
-    # Initialize the Text-to-Speech client
+    """Function to convert text to speech."""
+    global music_playing
     client = texttospeech.TextToSpeechClient()
 
     # Set the text input to be synthesized
@@ -55,6 +62,7 @@ def speak(text):
     # Load and play the MP3 file
     pygame.mixer.music.load('temp.mp3')
     pygame.mixer.music.play()
+    music_playing = True
 
     # Wait until the sound is finished
     while pygame.mixer.music.get_busy():
@@ -62,8 +70,10 @@ def speak(text):
 
     pygame.mixer.music.unload()
     os.remove("temp.mp3")  # Remove the temporary file
+    music_playing = False
 
 def change_speech_volume(command):
+    """Adjusts the speech volume."""
     volume = engine.getProperty('volume')  # Get the current volume (0.0 to 1.0)
     
     if "increase volume" in command.lower():
@@ -77,6 +87,7 @@ def change_speech_volume(command):
         speak("Decreasing volume.")
 
 def change_system_volume(command):
+    """Adjusts the system volume."""
     devices = AudioUtilities.GetSpeakers()
     interface = devices.Activate(
         AudioUtilities.IID_IAudioEndpointVolume, 1, None)
@@ -95,7 +106,11 @@ def change_system_volume(command):
         speak("Decreasing system volume.")
 
 def aiProcess(command):
+    """Send the command to Dialogflow for processing."""
     try:
+        if not command.strip():
+            return "Sorry, I didn't understand that."
+
         project_id = "canvas-rampart-448807"  # Replace with your Dialogflow project ID
         session_id = str(uuid.uuid4())  # Generate a unique session ID for each request
         language_code = "en"
@@ -104,29 +119,55 @@ def aiProcess(command):
         session_client = dialogflow.SessionsClient()
         session = session_client.session_path(project_id, session_id)
 
-        text_input = dialogflow.TextInput(text=command, language_code=language_code)
-        query_input = dialogflow.QueryInput(text_input)
+        # Create a properly formatted TextInput
+        text_input = dialogflow.TextInput(
+            text=command,  # Ensure the command is not empty
+            language_code=language_code
+        )
+
+        # Create the QueryInput object
+        query_input = dialogflow.QueryInput(text=text_input)
 
         # Send the request to Dialogflow
-        response = session_client.detect_intent(request={"session": session, "query_input": query_input})
+        response = session_client.detect_intent(
+            request={"session": session, "query_input": query_input}
+        )
 
         # Return Dialogflow's response
         return response.query_result.fulfillment_text
+
     except Exception as e:
         print(f"Dialogflow error: {e}")
         return "I'm sorry, I couldn't process that request."
 
 def search_and_play_song(song_name):
-    # Search the song on YouTube using youtube-search-python
+    """Search for a song on YouTube and play it."""
+    global music_playing, youtube_playing
     results = YoutubeSearch(song_name, max_results=1).to_dict()  # Get the top search result
     if results:
         video_url = f"https://www.youtube.com{results[0]['url_suffix']}"
         webbrowser.open(video_url)  # Open the video URL in the browser
         speak(f"Playing {song_name} on YouTube")
+        music_playing = True
+        youtube_playing = True
     else:
         speak("Sorry, I couldn't find the song on YouTube.")
+        music_playing = False
+        youtube_playing = False
+def stop_music():
+    """Pauses the music on YouTube by sending a spacebar press."""
+    global youtube_playing
+    if youtube_playing:
+        # Simulate pressing the spacebar key to pause/play
+        pyautogui.press("space")
+        speak("Music paused.")
+        youtube_playing=False
+    else:
+        speak("No YouTube music is currently playing.")
+
 
 def solve_math_problem(command):
+    """Solves simple math problems."""
     try:
         # Removing any unwanted characters to avoid issues
         command = command.replace("minus", "-").replace("plus", "+").replace("times", "*").replace("divided", "/")
@@ -141,6 +182,7 @@ def solve_math_problem(command):
         return "Sorry, there was an error solving that math problem."
 
 def get_weather(city):
+    """Fetch weather details for a given city."""
     try:
         api_key = "YOUR_OPENWEATHER_API_KEY"  # Replace with your OpenWeather API key
         url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
@@ -157,6 +199,7 @@ def get_weather(city):
         return "Sorry, I couldn't fetch the weather information."
 
 def get_system_status():
+    """Return system information such as CPU, memory, and battery status."""
     try:
         cpu = psutil.cpu_percent(interval=1)
         memory = psutil.virtual_memory().percent
@@ -166,14 +209,17 @@ def get_system_status():
         return "Sorry, I couldn't get the system status."
 
 def tell_joke():
+    """Fetch a random joke."""
     joke = pyjokes.get_joke()
     return joke
 
 def get_date_time():
+    """Fetch the current date and time."""
     now = datetime.datetime.now()
     return f"Today's date is {now.strftime('%A, %B %d, %Y')}, and the time is {now.strftime('%I:%M %p')}."
 
 def search_wikipedia(query):
+    """Search Wikipedia for the given query."""
     try:
         # Search Wikipedia and fetch the summary
         result = wikipedia.summary(query, sentences=2)  # Limit to 2 sentences
@@ -191,6 +237,8 @@ def search_wikipedia(query):
         return f"An error occurred: {str(e)}"
 
 def processCommand(c):
+    """Process different types of commands."""
+    global music_playing
     # Handle volume commands
     if "increase volume" in c.lower():
         change_speech_volume(c)
@@ -220,6 +268,16 @@ def processCommand(c):
         webbrowser.open("https://youtube.com")
     elif "open instagram" in c.lower():
         webbrowser.open("https://instagram.com")
+    
+    # Handle search command on YouTube
+    elif "search" in c.lower() and "on youtube" in c.lower():
+        song = c.lower().split("search", 1)[1].split("on youtube", 1)[0].strip()  # Extract song name
+        search_on_youtube(song)  # Perform YouTube search
+
+    elif "search" in c.lower() and "on google" in c.lower():
+        query = c.lower().split("search", 1)[1].split("on google", 1)[0].strip()  # Extract search query
+        search_on_google(query)  # Perform Google search
+    
     elif "play" in c.lower():
         song = c.lower().split("play", 1)[1].strip()  # Extract song name after "play"
         search_and_play_song(song)  # Search and play the song
@@ -240,10 +298,26 @@ def processCommand(c):
     elif "shut down" in c.lower():
         speak("Shutting down...")
         sys.exit()  # Exit the program
+    elif "stop the music" in c.lower():
+         stop_music()
     else:
         # Let Dialogflow handle the request
         output = aiProcess(c)
         speak(output)  # Speak the response
+
+def search_on_google(query):
+    """Search for the query on Google."""
+    google_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+    webbrowser.open(google_url)  # Open Google search results directly
+    speak(f"Searching for {query} on Google.")
+
+def search_on_youtube(song_name):
+    """Search for the song on YouTube."""
+    query = f"search {song_name} on youtube"
+    youtube_url = f"https://www.youtube.com/results?search_query={song_name.replace(' ', '+')}"
+    webbrowser.open(youtube_url)  # Open the search results directly
+    speak(f"Searching for {song_name} on YouTube.")
+
 
 def listen_for_wake_word():
     """ Continuously listens for the wake word 'Jarvis' to activate the assistant. """
@@ -257,16 +331,15 @@ def listen_for_wake_word():
                 speak("Yes?")
                 # Once 'Jarvis' is detected, start listening for the command
                 with sr.Microphone() as source:
-                    print("Listening for command...")
+                    print("Listening for your command...")
                     audio = recognizer.listen(source)
-                    command = recognizer.recognize_google(audio)
-                    processCommand(command)
+                command = recognizer.recognize_google(audio)
+                print(f"You said: {command}")
+                processCommand(command.lower())
         except sr.UnknownValueError:
-            print("I didn't catch that. Please repeat.")
-        except sr.RequestError as e:
-            print(f"Speech Recognition error: {e}")
-        except Exception as e:
-            print(f"Error: {e}")
+            pass
+        except sr.RequestError:
+            print("Could not request results from Google Speech Recognition service.")
+            break
 
-if __name__ == "__main__":
-    listen_for_wake_word()
+listen_for_wake_word()
